@@ -6,19 +6,19 @@
             [clojure.data.json :as json]
             [taoensso.carmine :as redis :refer (wcar)]))
 
-(defmacro wcar*
+(defmacro with-connection
   [& body]
   `(redis/wcar {:pool {} :spec {}} ~@body))
 
 (defn check
   [id index]
-  (if (= (wcar* (redis/get id)) index)
+  (if (= (with-connection (redis/get id)) index)
     (json/write-str {:result true})
     (json/write-str {:result false})))
 
 (defn create
   [id index]
-  (wcar* (redis/set id index))
+  (with-connection (redis/set id index))
   (json/write-str {:result "success"}))
 
 (defroutes app-routes
