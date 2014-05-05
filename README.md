@@ -19,4 +19,4 @@ To start a web server for the application, run:
 
 ## License
 
-Copyright © 2014 Aaron Bedra
+Copyright © 2014 Aaron Bedra. Licensed under the Eclipse Public License. See epl-v10.html for full license.
