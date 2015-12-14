@@ -1,0 +1,191 @@
+#+TITLE:     Nectar: A Honeychecker implementation
+#+AUTHOR:    Aaron Bedra
+#+EMAIL:     aaron@aaronbedra.com
+#+LANGUAGE:  en
+
+* Introduction
+
+This project is an attempt to impement the Honeychecker from [[http://people.csail.mit.edu/rivest/honeywords/paper.pdf][the
+original honeywords paper]]. The idea is simple. So simple in fact that
+it took me a while to come to terms with just how simple it is. After
+some thought and conversations with the authors I cam to the
+conclusion that I needed to implement a complete version to stop
+second guessing the premise.
+
+The Honeychecker is just a small piece of the puzzle, but it is the
+one component that can easily be (and should be) separated from the
+primary login system. This document will serve as not only a write up
+of the ideas, but a literate program. Emacs users can extract the
+document into running code by invoking the =org-babel-tangle=
+function.
+
+This system is implemmented using the [[http://clojure.org][Clojure]] language. Clojure is a
+Lisp dialect that targets the JVM and JavaScript. To read more about
+Clojure you can visit [[http://clojure.org][http://clojure.org]] or purchase a copy of my
+book, [[LINK][Programming Clojure, 2nd Edition]].
+
+* Project definition and dependencies
+
+We start by defining the project using [[LINK][Leningen]]. There are only a few
+dependencies necessary to complete the implementation. First, we have
+the Clojure language. Next, [[LINK][Compojure]], a lightweight routing and web
+server library. Since we are going to return data back to clients
+using JSON, we will use [[LINK][clojure.data.json]]. Finally, we will be using
+[[http://redis.io][Redis]] as our data store, and the [[LINK][Carmine]] library provides that
+functionality.
+
+The entry labeled =:plugins= is used for developing the
+application. [[LINK][lein-ring]] is a Leiningen plugin that allows for easy
+application startup and dynamic code reloading. The =:ring= entry lets
+=lein-ring= know where to find the application definintion so it can
+boot the application.
+
+#+HTML: <strong><i>project.clj</i></strong>
+#+begin_src clojure :mkdirp yes :tangle project.clj
+  (defproject nectar "0.1.0-SNAPSHOT"
+    :description "A Honeycheker implementation"
+    :url "https://github.com/abedra/nectar"
+    :dependencies [[org.clojure/clojure "1.5.1"]
+                   [compojure "1.1.6"]
+                   [org.clojure/data.json "0.2.4"]
+                   [com.taoensso/carmine "2.6.2"]]
+    :plugins [[lein-ring "0.8.10"]]
+    :ring {:handler nectar.handler/app})
+#+end_src
+
+* Implementation
+
+** Loading resources
+
+#+HTML: <strong><i>src/nectar/handler.clj</i></strong>
+#+begin_src clojure :mkdirp yes :tangle script/honeychecker.sh
+  (ns nectar.handler
+    (:use compojure.core)
+    (:require [compojure.handler :as handler]
+              [compojure.route :as route]
+              [ring.util.response :as ring]
+              [clojure.data.json :as json]
+              [taoensso.carmine :as redis :refer (wcar)]))
+
+#+end_src
+
+** Setting up the Redis connection
+
+#+HTML: <strong><i>src/nectar/handler.clj</i></strong>
+#+begin_src clojure :mkdirp yes :tangle script/honeychecker.sh
+  (defmacro with-connection
+    [& body]
+    `(redis/wcar {:pool {} :spec {}} ~@body))
+
+#+end_src
+
+** The create function
+
+#+HTML: <strong><i>src/nectar/handler.clj</i></strong>
+#+begin_src clojure :mkdirp yes :tangle script/honeychecker.sh
+  (defn create
+    [id index]
+    (with-connection (redis/set id index))
+    (json/write-str {:result "success"}))
+
+#+end_src
+
+** The check function
+
+#+HTML: <strong><i>src/nectar/handler.clj</i></strong>
+#+begin_src clojure :mkdirp yes :tangle script/honeychecker.sh
+  (defn check
+    [id index]
+    (if (= (with-connection (redis/get id)) index)
+      (json/write-str {:result true})
+      (json/write-str {:result false})))
+
+#+end_src
+
+
+** Defining the application routes
+
+#+HTML: <strong><i>src/nectar/handler.clj</i></strong>
+#+begin_src clojure :mkdirp yes :tangle script/honeychecker.sh
+  (defroutes app-routes
+    (POST "/" [id index] (check id index))
+    (POST "/create" [id index] (create id index))
+    (route/not-found "Not Found"))
+
+#+end_src
+
+
+** Defining the application
+
+#+HTML: <strong><i>src/nectar/handler.clj</i></strong>
+#+begin_src clojure :mkdirp yes :tangle script/honeychecker.sh
+  (def app
+    (handler/api app-routes))
+
+#+end_src
+
+
+* Using the nectar API
+
+** Adding a user
+
+#+begin_src sh
+  $ curl -d "id=$salt&index=$index" "http://localhost:3000/create"
+#+end_src
+
+** Checking a user
+
+#+begin_src sh
+  $ curl -d "id=$1&index=$2" "http://localhost:3000/"
+#+end_src
+
+** The provided test code
+
+#+HTML: <strong><i>script/honeychecker.sh</i></strong>
+#+begin_src sh :mkdirp yes :tangle script/honeychecker.sh
+  #!/bin/bash
+
+  set -o nounset
+  set -o errexit
+
+  make_salt () {
+      head /dev/urandom | uuencode -m - | sed -n 2p | cut -c1-${1:-8};
+  }
+
+  add_user () {
+      local salt=$(make_salt)
+      local index=$(( ( RANDOM % 100 )  + 1 ))
+      curl -d "id=$salt&index=$index" "http://localhost:3000/create" > /dev/null 2>&1
+      echo "User created with id = $salt and index = $index"
+  }
+
+  check_user () {
+      curl -d "id=$1&index=$2" "http://localhost:3000/"
+  }
+
+  case "$1" in
+      add)
+          add_user
+          ;;
+      check)
+          check_user $2 $3
+          ;;
+      *)
+          print_usage
+          exit 1
+          ;;
+  esac
+
+  exit $?
+#+end_src
+
+
+* Additional thoughts
+
+This is a simple implementation of a Honeychecker. There are
+additional things that can and should be done to secure this
+system. Callers of the Honeychecker should be verified. This could be
+done by IP whitelist restrictions, authetication tokens, or any other
+form of identification. This was intentionally left out of the sample
+implementation in order to clearly demonstrate exactly what the
+Honeychecker is and what it does.
