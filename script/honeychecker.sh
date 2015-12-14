@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 set -o nounset
@@ -20,15 +21,15 @@ check_user () {
 
 case "$1" in
     add)
-	add_user
-	;;
+        add_user
+        ;;
     check)
-	check_user $2 $3
-	;;
+        check_user $2 $3
+        ;;
     *)
-	print_usage
-	exit 1
-	;;
+        print_usage
+        exit 1
+        ;;
 esac
 
 exit $?
